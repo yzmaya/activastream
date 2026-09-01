@@ -8,6 +8,9 @@ se ve dentro del marco es el mundo IA.
 Todo corre en el navegador desde una página estática: sin build, sin backend,
 sin frameworks. La clave de fal la pones tú y se queda en tu navegador.
 
+**En vivo:** <https://yzmaya.github.io/activastream/>
+**Modo demo, sin cámara:** <https://yzmaya.github.io/activastream/?demo>
+
 ## Cómo se prueba
 
 En este orden, que es el que va de gratis y sin permisos a la experiencia
@@ -23,8 +26,9 @@ completa:
 3. **Con clave de fal.** Botón de la llave, arriba a la derecha. A partir de
    ahí la ventana muestra el mundo IA de verdad.
 
-La cámara necesita HTTPS o localhost: sirve la carpeta con un servidor
-estático (ver «Cómo correrlo en tu máquina») en vez de abrir el archivo a pelo.
+La cámara necesita HTTPS o localhost, así que en GitHub Pages funciona. En
+local, sirve la carpeta con un servidor estático (ver «Cómo correrlo en tu
+máquina») en vez de abrir el archivo a pelo.
 
 ## Los dos modelos
 
@@ -210,6 +214,8 @@ así que generar sin gesto es tirar el dinero. Con el ahorro puesto:
 Cualquier servidor estático sirve, no hay nada que compilar:
 
 ```bash
+git clone https://github.com/yzmaya/activastream.git
+cd activastream
 python3 -m http.server 8125
 ```
 
