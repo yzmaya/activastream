@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Finger Frame IA en tiempo real</title>
+  <meta name="description" content="Haz el marco de director con los dedos y el área dentro de tus manos se convierte en una ventana a un mundo generado por IA en tiempo real." />
+  <style>
+    :root {
+      /* Paleta neutra de la interfaz. Cambia estos tres valores y cambia
+         el acento de toda la página. */
+      --accent: #7c5cff;
+      --accent-soft: rgba(124, 92, 255, 0.18);
+      --on-accent: #ffffff;
+      --bg: #0a0a0c;
+      --panel: rgba(22, 20, 26, 0.88);
+      --line: rgba(255, 255, 255, 0.12);
+      --text: #f2eef1;
+      --muted: rgba(255, 255, 255, 0.62);
+      --riel: 202px;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow: hidden;
+    }
+    button, input, textarea { font-family: inherit; }
+
+    /* El video vive en el centro y los controles en columnas a los lados, así
+       la cámara queda despejada y grabar es recortar el rectángulo del medio. */
+    #stage {
+      position: fixed;
+      inset: 0;
+      padding: 14px var(--riel);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background:
+        radial-gradient(1100px 620px at 50% 12%, rgba(124, 92, 255, 0.12), transparent 70%),
+        var(--bg);
+    }
+    canvas { max-width: 100%; max-height: 100%; border-radius: 14px; }
+    video { display: none; }
+
+    /* ---- pantalla de carga ---- */
+    #status {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 24px;
+      background: var(--bg);
+      transition: opacity 0.4s;
+    }
+    #status.hidden { opacity: 0; pointer-events: none; }
+    #status-text { font-size: 15px; color: var(--muted); max-width: 34ch; line-height: 1.5; }
+    .spinner {
+      width: 30px; height: 30px;
+      border: 3px solid rgba(255, 255, 255, 0.14);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---- pista inferior ---- */
+    #hint {
+      position: fixed;
+      left: 0; right: 0;
+      bottom: 92px;
+      z-index: 5;
+      text-align: center;
+      padding: 0 16px;
+      pointer-events: none;
+      transition: opacity 0.4s;
+      animation: float 3.2s ease-in-out infinite;
+    }
+    #hint.hidden { opacity: 0; }
+    #hint-text {
+      font-size: 15px;
+      color: rgba(255, 255, 255, 0.9);
+      text-shadow: 0 1px 8px rgba(0, 0, 0, 0.85);
+      animation: pulse 2.4s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
+    @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+
+    /* ---- rieles laterales ---- */
+    .riel {
+      position: fixed;
+      top: 0; bottom: 0;
+      width: var(--riel);
+      z-index: 7;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 8px;
+      padding: 14px;
+      overflow-y: auto;
+      transition: opacity 0.25s;
+    }
+    #toolbar { left: 0; }
+    #riel-der { right: 0; align-items: stretch; }
+
+    #hud {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: none;
+      margin-top: 6px;
+    }
+    /* En el riel el fondo de la página es casi negro: las pastillas necesitan
+       algo más de cuerpo para no desaparecer. */
+    .riel .chip {
+      background: rgba(34, 30, 40, 0.92);
+      line-height: 1.35;
+      text-align: left;
+    }
+    #live-pill.on { display: flex; align-items: flex-start; }
+    #live-pill .dot { flex: none; margin-top: 4px; }
+
+    /* ---- barrita de transformación ---- */
+    #pasos-caja {
+      background: rgba(20, 20, 24, 0.72);
+      border: 1px solid var(--line);
+      backdrop-filter: blur(12px);
+      border-radius: 14px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    #pasos-caja label {
+      font-size: 11.5px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      color: rgba(255, 255, 255, 0.82);
+    }
+    #pasos-valor { color: var(--accent); }
+    #pasos {
+      width: 100%;
+      accent-color: var(--accent);
+      cursor: pointer;
+      margin: 0;
+    }
+    #reset-btn {
+      appearance: none;
+      margin-top: 4px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.8);
+      border-radius: 9px;
+      padding: 7px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    #reset-btn:hover { background: var(--accent-soft); }
+    #pasos-caja .extremos {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.45);
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      border-radius: 999px;
+      background: rgba(20, 20, 24, 0.72);
+      border: 1px solid var(--line);
+      backdrop-filter: blur(12px);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+    #live-pill { display: none; }
+    #live-pill.on { display: inline-flex; }
+    #live-pill .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #4ade80;
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    #live-pill.connecting .dot { background: #ffc24b; }
+    #live-pill.error .dot { background: #ff6b5e; animation: none; }
+    #live-pill.local .dot { background: var(--accent); }
+    #live-pill.paused .dot { background: rgba(255,255,255,0.55); animation: none; }
+    #stats {
+      font-size: 11.5px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      color: var(--muted);
+      padding: 5px 11px;
+    }
+
+    /* ---- grabar y repositorio ---- */
+    #rec-btn {
+      appearance: none;
+      border: 1px solid rgba(255, 90, 90, 0.4);
+      background: rgba(40, 20, 26, 0.8);
+      backdrop-filter: blur(12px);
+      color: #ffd9d9;
+      border-radius: 12px;
+      padding: 11px 12px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex; align-items: center; gap: 8px;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    #rec-btn:hover { background: rgba(60, 26, 34, 0.9); }
+    #rec-btn .rec-punto {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #ff5a5a; flex: none;
+    }
+    #rec-btn.grabando {
+      background: #ff4d4d; border-color: #ff4d4d; color: #fff;
+    }
+    #rec-btn.grabando .rec-punto {
+      background: #fff; border-radius: 2px;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+
+
+    /* ---- botón y panel de la clave ---- */
+    #key-btn {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: rgba(20, 20, 24, 0.72);
+      backdrop-filter: blur(12px);
+      border-radius: 12px;
+      font-size: 18px;
+      line-height: 1;
+      padding: 10px 12px;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    #key-btn:hover { background: var(--accent-soft); border-color: rgba(124, 92, 255, 0.45); }
+
+    #key-panel {
+      position: fixed;
+      top: 64px; right: 16px;
+      z-index: 8;
+      width: 360px;
+      max-width: calc(100vw - 32px);
+      max-height: calc(100vh - 88px);
+      overflow-y: auto;
+      background: var(--panel);
+      backdrop-filter: blur(18px);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 18px;
+      transition: opacity 0.2s, transform 0.2s;
+    }
+    #key-panel.hidden { opacity: 0; transform: translateY(-8px); pointer-events: none; }
+    #key-panel h2 { font-size: 15px; margin-bottom: 8px; }
+    #key-panel h3 { font-size: 13px; margin: 16px 0 8px; color: var(--accent); letter-spacing: 0.02em; }
+    #key-panel p { font-size: 12.5px; color: var(--muted); line-height: 1.55; margin-bottom: 10px; }
+    #key-panel a { color: var(--accent); }
+    #key-panel .head { display: flex; justify-content: space-between; align-items: center; }
+    #key-close {
+      appearance: none; border: none; background: transparent;
+      color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px;
+    }
+    #key-panel input[type="password"], #key-panel textarea {
+      width: 100%;
+      padding: 9px 11px;
+      border-radius: 9px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(0, 0, 0, 0.35);
+      color: var(--text);
+      font-size: 13px;
+      margin-bottom: 10px;
+      resize: vertical;
+    }
+    #key-panel input[type="password"] { font-family: ui-monospace, SFMono-Regular, monospace; }
+    #key-panel input:focus, #key-panel textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    #key-panel label.check, #key-panel label.radio {
+      display: flex; align-items: flex-start; gap: 8px;
+      font-size: 12.5px; color: rgba(255, 255, 255, 0.78);
+      margin-bottom: 8px; cursor: pointer; line-height: 1.4;
+    }
+    #key-panel input[type="checkbox"], #key-panel input[type="radio"] { accent-color: var(--accent); margin-top: 2px; }
+    .row { display: flex; gap: 8px; margin: 14px 0 10px; }
+    .row button {
+      flex: 1; appearance: none; border: none; border-radius: 10px;
+      padding: 9px 0; font-size: 13px; font-weight: 700; cursor: pointer;
+    }
+    #key-save { background: var(--accent); color: var(--on-accent); }
+    #prompt-restaurar { background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.82); }
+    #prompt-restaurar:disabled { opacity: 0.35; cursor: default; }
+    #prompt-marca {
+      display: none;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      color: var(--on-accent);
+      background: var(--accent);
+      border-radius: 999px;
+      padding: 2px 7px;
+      vertical-align: 1px;
+    }
+    #prompt-marca.propio { display: inline-block; }
+    #prompt-activo { font-size: 12px; line-height: 1.5; }
+    #key-clear { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.82); }
+    .note { font-size: 11.5px; color: rgba(255, 255, 255, 0.45); line-height: 1.5; margin-bottom: 0 !important; }
+
+    /* ---- selector de estilos ---- */
+    #toolbar button {
+      appearance: none;
+      border: 1px solid transparent;
+      background: rgba(20, 20, 24, 0.72);
+      backdrop-filter: blur(12px);
+      color: rgba(255, 255, 255, 0.78);
+      font-size: 12.5px; font-weight: 600;
+      text-align: left;
+      padding: 9px 11px; border-radius: 11px; cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      white-space: nowrap;
+      display: flex; align-items: center; gap: 7px;
+    }
+    #toolbar button:hover { background: rgba(255, 255, 255, 0.08); }
+    #toolbar button.active { background: var(--accent); color: var(--on-accent); }
+    #toolbar button .key { opacity: 0.55; font-weight: 400; margin-right: 6px; font-size: 11px; }
+    #toolbar button .badge {
+      opacity: 0.5; font-weight: 700; margin-left: 7px;
+      font-size: 9.5px; letter-spacing: 0.06em; vertical-align: 1px;
+    }
+    /* ---- formato vertical 9:16 para TikTok e Instagram ----
+       El video sigue siendo 16:9 porque el gesto necesita las dos manos
+       separadas y un recorte vertical las dejaría fuera de cuadro. Así que en
+       vez de recortar, se encaja el 16:9 dentro de un lienzo 9:16 con un
+       telón arriba y abajo, que además deja sitio para los títulos. */
+    body.vertical #stage {
+      padding: 0;
+      inset: auto;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: min(100vw, calc(100vh * 9 / 16));
+      height: min(100vh, calc(100vw * 16 / 9));
+      background: linear-gradient(170deg, #23233a 0%, #2e2e4d 52%, #3a3a5e 100%);
+      overflow: hidden;
+    }
+    body.vertical #stage { --zoom: 1; }
+    body.vertical canvas {
+      width: 100%;
+      height: auto;
+      max-width: none;
+      max-height: none;
+      border-radius: 0;
+      /* Acercar recorta por los lados, así que lo decide quien graba: más
+         zoom llena más el vertical, menos zoom conserva las manos abiertas. */
+      transform: scale(var(--zoom));
+      transform-origin: center;
+    }
+
+    /* ---- modo grabación: solo el video y el marco ---- */
+    body.limpio .riel,
+    body.limpio #hint,
+    body.limpio #key-panel {
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s;
+    }
+    /* El puntero también sobra en una grabación. */
+    body.limpio { cursor: none; }
+
+    #toast {
+      position: fixed;
+      left: 50%;
+      bottom: 92px;
+      transform: translateX(-50%);
+      z-index: 12;
+      padding: 10px 16px;
+      border-radius: 999px;
+      background: rgba(20, 20, 24, 0.86);
+      border: 1px solid var(--line);
+      backdrop-filter: blur(12px);
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+      max-width: calc(100vw - 32px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.35s;
+    }
+    #toast.show { opacity: 1; }
+
+    /* Por debajo de esto no hay ancho para dos columnas laterales: si se
+       mantuvieran, el video quedaría en una franja diminuta en el centro.
+       Los rieles vuelven a ser barras arriba y abajo. */
+    @media (max-width: 1040px) {
+      :root { --riel: 0px; }
+      .riel {
+        top: auto; bottom: 0; width: 100%;
+        flex-direction: row; flex-wrap: wrap;
+        justify-content: center; align-items: center;
+        gap: 6px; padding: 8px;
+        overflow: visible;
+      }
+      #riel-der { top: 0; bottom: auto; }
+      #hud { flex-direction: row; margin-top: 0; }
+      #pasos-caja { flex: 0 1 220px; padding: 8px 12px; }
+      #reset-btn {
+      appearance: none;
+      margin-top: 4px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.8);
+      border-radius: 9px;
+      padding: 7px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    #reset-btn:hover { background: var(--accent-soft); }
+    #pasos-caja .extremos { display: none; }
+      #toolbar button { padding: 7px 10px; font-size: 12px; }
+      #toolbar button .badge { display: none; }
+      #toast { bottom: 120px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="status">
+    <div class="spinner"></div>
+    <div id="status-text">Iniciando…</div>
+  </div>
+
+  <div id="stage">
+    <video id="video" autoplay playsinline muted></video>
+    <video id="lucy" autoplay playsinline muted></video>
+    <canvas id="canvas"></canvas>
+  </div>
+
+
+  <div id="hint">
+    <div id="hint-text">Encuadra tu toma: las dos manos arriba, pulgar e índice bien abiertos.</div>
+  </div>
+
+  <!-- Riel izquierdo: los estilos, fuera del video para poder grabar limpio -->
+  <div id="toolbar" class="riel"></div>
+
+  <!-- Riel derecho: clave, transformación e indicadores -->
+  <div id="riel-der" class="riel">
+    <button id="key-btn" type="button" title="Clave de fal" aria-label="Clave de fal">🔑</button>
+
+    <div id="pasos-caja">
+      <label for="pasos">Transformación <span id="pasos-valor">3</span>/6</label>
+      <input id="pasos" type="range" min="1" max="6" step="1" value="3" />
+      <div class="extremos"><span>te pareces</span><span>más estilo</span></div>
+
+      <label for="arrastre" style="margin-top:6px">Arrastre <span id="arrastre-valor">0.90</span></label>
+      <input id="arrastre" type="range" min="0.5" max="1" step="0.05" value="0.9" />
+      <div class="extremos"><span>más estable</span><span>te sigue antes</span></div>
+
+      <button id="reset-btn" type="button">Volver a lo que funciona</button>
+    </div>
+
+    <button id="rec-btn" type="button">
+      <span class="rec-punto"></span><span id="rec-texto">Grabar</span>
+    </button>
+
+
+    <div id="hud">
+      <div id="live-pill" class="chip"><span class="dot"></span><span id="live-text"></span></div>
+      <div id="stats" class="chip"></div>
+    </div>
+  </div>
+
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <div id="key-panel" class="hidden">
+    <div class="head">
+      <h2>Clave de fal</h2>
+      <button id="key-close" type="button" aria-label="Cerrar">×</button>
+    </div>
+    <p>
+      La ventana muestra un <strong>mundo IA generado en tiempo real</strong> en
+      <a href="https://fal.ai" target="_blank" rel="noopener">fal</a> con dos modelos:
+      <a href="https://fal.ai/models/decart/lucy-2-5/realtime" target="_blank" rel="noopener">Lucy&nbsp;2.5</a>
+      (video a video por WebRTC, realista y enganchado a tu movimiento) y
+      <a href="https://fal.ai/models/fal-ai/flux-2-klein-realtime/realtime" target="_blank" rel="noopener">FLUX.2&nbsp;[klein]</a>
+      (edición cuadro por cuadro, más libre y soñadora).
+      Saca tu clave en <a href="https://fal.ai/dashboard/keys" target="_blank" rel="noopener">fal.ai/dashboard/keys</a>.
+    </p>
+    <input id="key-input" type="password" placeholder="tu clave de fal (id:secreto)" autocomplete="off" spellcheck="false" />
+    <label class="check">
+      <input type="checkbox" id="key-remember" />
+      Recordar en este dispositivo
+    </label>
+
+    <h3>Consumo</h3>
+    <label class="check">
+      <input type="checkbox" id="economy" checked />
+      <span>
+        <strong>Modo ahorro.</strong> Generar solo mientras tienes el marco hecho
+        con los dedos. Klein deja de mandar cuadros en cuanto lo deshaces, y la
+        sesión de Lucy se corta a los 20 segundos sin gesto y se reanuda sola.
+      </span>
+    </label>
+    <p class="note">
+      <strong>Versión 15.</strong> Si al recargar no cambia este número, el
+      navegador está sirviendo una copia vieja: recarga con Cmd+Shift+R. El
+      cuadro de abajo enseña el prompt que se está usando de verdad, que es la
+      forma segura de saber qué versión hay cargada.
+    </p>
+    <p class="note">
+      Precios de fal a 13 de agosto de 2026: Lucy cuesta $0.04 por segundo
+      conectada, o sea <strong>$2.40 el minuto</strong>; klein cuesta $0.00194
+      por segundo de cómputo, unos <strong>$0.12 el minuto</strong> generando.
+      El contador de arriba a la izquierda estima lo que llevas gastado en esta
+      sesión; la cifra que manda es la de tu panel de fal.
+    </p>
+
+    <h3>Grabación</h3>
+    <p>
+      El botón <strong>Grabar</strong> (o la tecla <strong>R</strong>) graba el
+      video directamente, sin grabar la pantalla: el archivo sale sin interfaz,
+      sin puntero y ya en 9:16 con su telón de fondo si tienes puesto el
+      formato vertical. Al parar se descarga solo. No lleva audio.
+    </p>
+    <p>
+      <strong>O</strong> oculta toda la interfaz. Con el botón de grabar ya no
+      hace falta, pero sirve si prefieres grabar la pantalla a mano. Las teclas
+      1 a 7 siguen cambiando de estilo con la interfaz oculta.
+    </p>
+    <p>
+      <strong>,</strong> y <strong>.</strong> ajustan cuánto te transforma el
+      modelo, de 1 a 6. Menos es más parecida a ti, más es más estilo.
+    </p>
+    <p>
+      <strong>V</strong> pasa a formato vertical 9:16 para TikTok e Instagram,
+      con un telón arriba y abajo para tus títulos. Pon la
+      pantalla completa antes, así el video sale con la mayor resolución
+      posible. Las dos teclas se combinan.
+    </p>
+
+    <h3>Prompt del estilo activo <span id="prompt-marca"></span></h3>
+    <p>
+      Esto es lo que se le manda al modelo ahora mismo. Edítalo y se aplica al
+      instante, sin esperar a nada. Se guarda por estilo, y en cuanto lo tocas
+      <strong>tu texto manda sobre el de fábrica</strong>: si aparece la
+      etiqueta de color, estás usando tu versión y los cambios que se publiquen
+      en el código no te van a llegar hasta que pulses «Restaurar el de
+      fábrica».
+    </p>
+    <textarea id="prompt-activo" rows="6" spellcheck="false"></textarea>
+    <div class="row">
+      <button id="prompt-restaurar" type="button">Restaurar el de fábrica</button>
+    </div>
+
+    <h3>Estilo personalizado</h3>
+    <textarea id="style-custom" rows="3"
+      placeholder="Lo usa el estilo Personalizado. Lucy funciona mejor con su plantilla: «Change the style of the video to stained glass: …». Klein prefiere fraseo de edición: «Turn this into a living oil painting»."></textarea>
+    <label class="radio">
+      <input type="radio" name="custom-backend" value="lucy" />
+      <span>Lucy 2.5: realista, sigue tu movimiento. Se cobra por tiempo conectado.</span>
+    </label>
+    <label class="radio">
+      <input type="radio" name="custom-backend" value="klein" checked />
+      <span>FLUX.2 klein: creativo, reimagina cada cuadro. Se cobra por cuadro generado.</span>
+    </label>
+
+    <div class="row">
+      <button id="key-save" type="button">Guardar y conectar</button>
+      <button id="key-clear" type="button">Borrar</button>
+    </div>
+    <p class="note">
+      Tu clave se queda en tu navegador y solo se usa para acuñar tokens de sesión
+      de corta duración contra fal. Tu video no se guarda ni se sube a ningún otro
+      lado. La sesión de Lucy se corta al cambiar de estilo o cerrar la pestaña.
+      Sin clave, los estilos caen a un filtro local gratuito.
+    </p>
+  </div>
+
+  <!-- Cada archivo se cachea por separado, así que el navegador puede servir un
+       index.html nuevo con un styles.js viejo: la página parece actualizada y
+       los prompts son los de ayer. El mapa de importaciones le pone versión a
+       todos los módulos de golpe, y basta con subir este número al publicar. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "./main.js": "./main.js?v=15",
+      "./styles.js": "./styles.js?v=15",
+      "./tracking.js": "./tracking.js?v=15",
+      "./composite.js": "./composite.js?v=15",
+      "./backends.js": "./backends.js?v=15",
+      "./hands.js": "./hands.js?v=15",
+      "./demo.js": "./demo.js?v=15",
+      "./ui.js": "./ui.js?v=15",
+      "./grabacion.js": "./grabacion.js?v=15"
+    }
+  }
+  </script>
+  <script type="module" src="./main.js?v=15"></script>
+</body>
+</html>
