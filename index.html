@@ -123,6 +123,8 @@
       background: rgba(34, 30, 40, 0.92);
       line-height: 1.35;
       text-align: left;
+      /* Con 999px un mensaje de varias líneas se volvía un óvalo enorme. */
+      border-radius: 14px;
     }
     #live-pill.on { display: flex; align-items: flex-start; }
     #live-pill .dot { flex: none; margin-top: 4px; }
@@ -510,7 +512,7 @@
       </span>
     </label>
     <p class="note">
-      <strong>Versión 15.</strong> Si al recargar no cambia este número, el
+      <strong>Versión 16.</strong> Si al recargar no cambia este número, el
       navegador está sirviendo una copia vieja: recarga con Cmd+Shift+R. El
       cuadro de abajo enseña el prompt que se está usando de verdad, que es la
       forma segura de saber qué versión hay cargada.
@@ -591,18 +593,18 @@
   <script type="importmap">
   {
     "imports": {
-      "./main.js": "./main.js?v=15",
-      "./styles.js": "./styles.js?v=15",
-      "./tracking.js": "./tracking.js?v=15",
-      "./composite.js": "./composite.js?v=15",
-      "./backends.js": "./backends.js?v=15",
-      "./hands.js": "./hands.js?v=15",
-      "./demo.js": "./demo.js?v=15",
-      "./ui.js": "./ui.js?v=15",
-      "./grabacion.js": "./grabacion.js?v=15"
+      "./main.js": "./main.js?v=16",
+      "./styles.js": "./styles.js?v=16",
+      "./tracking.js": "./tracking.js?v=16",
+      "./composite.js": "./composite.js?v=16",
+      "./backends.js": "./backends.js?v=16",
+      "./hands.js": "./hands.js?v=16",
+      "./demo.js": "./demo.js?v=16",
+      "./ui.js": "./ui.js?v=16",
+      "./grabacion.js": "./grabacion.js?v=16"
     }
   }
   </script>
-  <script type="module" src="./main.js?v=15"></script>
+  <script type="module" src="./main.js?v=16"></script>
 </body>
 </html>

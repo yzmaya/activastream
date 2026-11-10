@@ -24,6 +24,8 @@ import {
 import { squashPoint, unsquashPoint, withAlpha, FpsMeter } from "../composite.js";
 import {
   BackendManager,
+  LucySession,
+  lucyRetryText,
   demandActive,
   KLEIN_IDLE_TAIL_MS,
   LUCY_IDLE_TAIL_MS,
@@ -530,6 +532,66 @@ test("apagar el ahorro en caliente deshace la pausa y reconecta Lucy", () => {
   m.setEconomy(false);
   assert.equal(m.lucyPausedByIdle, false);
   assert.equal(m.resumed, 1);
+});
+
+test("apagar el ahorro con klein en pausa vuelve a contar el gasto", () => {
+  const { m, advance } = fakeManager({ backend: "klein" });
+  m.openKleinClock();
+  m.setDemand(false);
+  advance(KLEIN_IDLE_TAIL_MS + 1);
+  m.setDemand(false);
+  assert.equal(m.kleinPaused, true);
+  const alPausar = m.spend.kleinSeconds;
+
+  m.setEconomy(false);
+  advance(10000); // klein genera sin parar: tiene que contar
+  assert.ok(
+    Math.abs(m.spend.kleinSeconds - alPausar - 10) < 1e-9,
+    `contó ${m.spend.kleinSeconds - alPausar} s`
+  );
+});
+
+test("un error de Lucy antes de llegar el video cierra la sesión aunque haya WebRTC", () => {
+  // "Concurrent session limit reached" llega con el peer ya creado. Antes se
+  // trataba como recuperable y la sesión se quedaba colgada sin reintentar.
+  const estados = [];
+  const errores = [];
+  const s = new LucySession({
+    fal: null,
+    stream: null,
+    onRemoteStream: () => {},
+    onError: (e) => errores.push(e),
+    onStateChange: (st) => estados.push(st),
+  });
+  s.connection = { close() {}, send() {} };
+  s.pc = { close() {} };
+  s.handleMessage({ type: "error", error: "Concurrent session limit reached." });
+  assert.equal(s.disposed, true, "la sesión se suelta");
+  assert.deepEqual(estados, ["idle"], "y avisa para que el manager reintente");
+  assert.equal(errores.length, 1);
+});
+
+test("ya en vivo, un error de Lucy no tumba la sesión", () => {
+  const s = new LucySession({
+    fal: null,
+    stream: null,
+    onRemoteStream: () => {},
+    onError: () => {},
+    onStateChange: () => {},
+  });
+  s.connection = { close() {}, send() {} };
+  s.pc = { close() {} };
+  s.live = true;
+  s.handleMessage({ type: "error", error: "prompt rechazado" });
+  assert.equal(s.disposed, false);
+});
+
+test("el reintento de Lucy explica el límite de sesiones simultáneas", () => {
+  const t = lucyRetryText("Lucy devolvió un error: Concurrent session limit reached.", 8);
+  assert.match(t, /OTRA SESIÓN/);
+  assert.match(t, /OTRA PESTAÑA/);
+  assert.match(t, /8 S/);
+  assert.equal(lucyRetryText("", 5), "LUCY OCUPADO · REINTENTO EN 5 S");
 });
 
 test("sin clave el ahorro no toca nada", () => {

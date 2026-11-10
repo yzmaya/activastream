@@ -74,6 +74,18 @@ export const PRECIOS_USD = {
   klein: 0.00194,
 };
 
+/**
+ * Texto de la pastilla mientras Lucy espera para reintentar. Puro, para poder
+ * probarlo. El límite de sesiones simultáneas casi siempre es otra pestaña
+ * con la app abierta, así que se dice eso y no el mensaje crudo de fal.
+ */
+export function lucyRetryText(lastError, secs) {
+  if (/concurrent session/i.test(lastError || "")) {
+    return `YA HAY OTRA SESIÓN DE LUCY (¿OTRA PESTAÑA?) · REINTENTO EN ${secs} S`;
+  }
+  return `LUCY OCUPADO · REINTENTO EN ${secs} S`;
+}
+
 /** ¿Hay que seguir generando? Puro, para poder probarlo. */
 export function demandActive(gestureActive, lastActiveAt, now, tailMs) {
   return gestureActive || now - lastActiveAt < tailMs;
@@ -101,6 +113,8 @@ export class LucySession {
     this.pc = null;
     this.disposed = false;
     this.connectTimer = null;
+    /** ¿Ya llegó el video transformado? Antes de eso, todo error es fatal. */
+    this.live = false;
   }
 
   start(prompt) {
@@ -169,9 +183,12 @@ export class LucySession {
           break;
         case "error": {
           const detail = `Lucy devolvió un error: ${message.error ?? "desconocido"}`;
-          // Antes del arranque WebRTC un error es fatal para la sesión; ya en
-          // vivo, los errores de edición son recuperables.
-          if (!this.pc) this.fail(detail);
+          // Mientras no llegue el video, un error es fatal para la sesión: hay
+          // que soltarla y reintentar. "Concurrent session limit" llega con el
+          // WebRTC ya montado, y tratarlo como recuperable dejaba la sesión
+          // colgada para siempre, sin reintento. Ya en vivo, los errores de
+          // edición sí son recuperables.
+          if (!this.live) this.fail(detail);
           else this.onError(detail);
           break;
         }
@@ -203,6 +220,7 @@ export class LucySession {
       if (this.disposed || this.pc !== pc) return;
       const remote = event.streams[0];
       if (!remote) return;
+      this.live = true;
       this.onStateChange("open");
       this.onRemoteStream(remote);
     };
@@ -339,6 +357,7 @@ export class BackendManager {
     this.lucyLive = false;
     this.lucyRetryTimer = null;
     this.lucyRetryDelayMs = LUCY_RETRY_START_MS;
+    this.lucyLastError = "";
 
     this.kleinSession = null;
     this.kleinBitmap = null;
@@ -450,8 +469,15 @@ export class BackendManager {
   setEconomy(on) {
     this.economy = !!on;
     if (this.economy) return;
-    // Al apagarlo, deshacer cualquier pausa que siguiera puesta.
-    this.kleinPaused = false;
+    // Al apagarlo, deshacer cualquier pausa que siguiera puesta. klein vuelve
+    // a generar, así que su reloj de gasto tiene que volver a correr.
+    if (this.kleinPaused) {
+      this.kleinPaused = false;
+      if (this.kleinSession) {
+        this.openKleinClock();
+        this.onStatus("live", "KLEIN · GENERANDO…");
+      }
+    }
     if (this.lucyPausedByIdle) {
       this.lucyPausedByIdle = false;
       void this.resumeLucy();
@@ -540,10 +566,15 @@ export class BackendManager {
         this.lucyVideo.play().catch(() => {});
         this.lucyLive = true;
         this.lucyRetryDelayMs = LUCY_RETRY_START_MS;
+        this.lucyLastError = "";
+        // El reloj arranca cuando llega el video, no al empezar a conectar:
+        // los intentos fallidos no son tiempo de sesión.
+        this.openLucyClock();
         this.onStatus("live", "EN VIVO · LUCY 2.5");
       },
       onError: (message) => {
         console.error(message);
+        this.lucyLastError = message;
         if (!this.lucyLive) this.onStatus("error", "IA FUERA DE LÍNEA: " + message);
       },
       onStateChange: (state) => {
@@ -560,14 +591,13 @@ export class BackendManager {
       },
     });
     this.lucySession = session;
-    this.openLucyClock();
     session.start(this.prompt);
   }
 
   scheduleLucyRetry() {
     if (this.lucyRetryTimer || this.backend !== "lucy" || !this.apiKey) return;
     const secs = Math.round(this.lucyRetryDelayMs / 1000);
-    this.onStatus("connecting", `LUCY OCUPADO · REINTENTO EN ${secs} S`);
+    this.onStatus("connecting", lucyRetryText(this.lucyLastError, secs));
     this.lucyRetryTimer = setTimeout(async () => {
       this.lucyRetryTimer = null;
       if (this.backend !== "lucy" || this.lucySession) return;
